@@ -1,147 +1,83 @@
-# Cog Template Repository
+# Cog `.python-version` vs `cog.yaml` conflict: Minimal reproducible example
 
-This is a template repository for creating [Cog](https://github.com/replicate/cog) models that efficiently handle model weights with proper caching. It includes tools to upload model weights to Google Cloud Storage and generate download code for your `predict.py` file.
+This repository shows a bug in [Cog](https://github.com/replicate/cog) where `cog predict` can fail when starting its container. This happens if you have a `.python-version` file in your project that asks for a different Python version than your `cog.yaml` file does.
 
-[![Cog](https://github.com/replicate/cog/raw/main/docs/header.png)](https://github.com/replicate/cog)
+**GitHub Issue:** [replicate/cog#2275](https://github.com/replicate/cog/issues/2275)
 
-## Getting Started
+## What's happening?
 
-To use this template for your own model:
+Cog uses a tool called `pyenv` inside its build containers to handle Python versions. Your `cog.yaml` file tells Cog which Python version to install when it builds the container image (for example, `python_version: "3.11"`).
 
-1. Clone this repository
-2. Modify `predict.py` with your model's implementation
-3. Update `cog.yaml` with your model's dependencies
-4. Use `cache_manager.py` to upload and manage model weights
+But, if you also have a file named `.python-version` in your project's main directory, Cog copies that file into the container image too. When the container starts up, `pyenv` sees the `.python-version` file and tries to use the Python version specified *in that file* (say, `3.10`).
 
-## Repository Structure
+If the version in your `.python-version` file (like `3.10`) doesn't match the version Cog actually installed based on `cog.yaml` (like `3.11`), `pyenv` gives up and causes `cog predict` to stop with an error like this:
 
-- `predict.py`: The main model implementation file 
-- `cache_manager.py`: Script for uploading model weights to GCS and generating download code
-- `cog.yaml`: Cog configuration file that defines your model's environment
-
-## Managing Model Weights with cache_manager.py
-
-A key feature of this template is the `cache_manager.py` script, which helps you:
-
-1. Upload model weights to Google Cloud Storage (GCS)
-2. Generate code for downloading those weights in your `predict.py`
-3. Handle both individual files and directories efficiently
-
-### Prerequisites for Using cache_manager.py
-
-- Google Cloud SDK installed and configured (`gcloud` command)
-- Permission to upload to the specified GCS bucket (default: `gs://replicate-weights/`)
-- `tar` command available in your PATH
-
-### Basic Usage
-
-```bash
-python cache_manager.py --model-name your-model-name --local-dirs model_cache
+```
+pyenv: version `<version from .python-version>` is not installed (set by /src/.python-version)
+ⅹ Failed to get container status: exit status 1
 ```
 
-This will:
-1. Find files and directories in the `model_cache` directory
-2. Create tar archives of each directory
-3. Upload both individual files and tar archives to GCS
-4. Generate code snippets for downloading the weights in your `predict.py`
+This error happens during the container's startup, even if the Docker image itself built just fine.
 
-### Advanced Usage
+**Good to know:** Running `cog init` doesn't create a `.python-version` file for you. You might have one if you cloned a project from somewhere else or if another tool created it.
 
-```bash
-python cache_manager.py \
-    --model-name your-model-name \
-    --local-dirs model_cache weights \
-    --gcs-base-path gs://replicate-weights/ \
-    --cdn-base-url https://weights.replicate.delivery/default/ \
-    --keep-tars
-```
+## How this repository shows the bug
 
-#### Parameters
+We've set up this repository so you can see the bug in action:
 
-- `--model-name`: Required. The name of your model (used in paths)
-- `--local-dirs`: Required. One or more local directories to process
-- `--gcs-base-path`: Optional. Base Google Cloud Storage path
-- `--cdn-base-url`: Optional. Base CDN URL
-- `--keep-tars`: Optional. Keep the generated .tar files locally after upload
+1.  **Working setup (this is how the repo starts):**
+    *   The `.python-version` file asks for `3.10`.
+    *   The `cog.yaml` file also asks for `python_version: "3.10"`.
+    *   Because these match, `cog predict` works correctly.
 
-## Workflow Example
+2.  **Broken setup (after you change one file):**
+    *   The `.python-version` file still asks for `3.10`.
+    *   You change `cog.yaml` to ask for `python_version: "3.11"`.
+    *   Now the versions don't match, and `cog predict` will fail with the `pyenv` error.
 
-1. **Develop your model locally**:
-   ```bash
-   # Run your model once to download weights to model_cache
-   cog predict -i prompt="test"
-   ```
+## Steps to reproduce the bug
 
-2. **Upload model weights**:
-   ```bash
-   python cache_manager.py --model-name your-model-name --local-dirs model_cache
-   ```
+1.  **Clone this repository:**
+    ```bash
+    git clone https://github.com/zsxkib/cog-minimal-example-of-pyenv-python-version-bug # Or your fork's URL
+    cd cog-minimal-example-of-pyenv-python-version-bug
+    ```
+2.  **Run prediction (it should work):**
+    Check that both `.python-version` and `cog.yaml` (look for `build.python_version`) specify `3.10`.
+    ```bash
+    sudo cog predict -i text="Works"
+    ```
+    *What you should see:* The prediction finishes, showing "hello world Works".
 
-3. **Copy the generated code snippet** into your `predict.py`
+3.  **Create the version conflict:**
+    Open `cog.yaml` in your editor and change `python_version` from `"3.10"` to `"3.11"`.
+    ```yaml
+    # cog.yaml
+    build:
+      # ...
+      python_version: "3.11" # <-- Change this line
+      # ...
+    ```
+4.  **Run prediction (it should fail):**
+    Because you changed `cog.yaml`, Cog needs to rebuild the image.
+    ```bash
+    sudo cog predict -i text="Fails"
+    ```
+    *What you should see:* The Docker build might finish, but the prediction fails when the container tries to start, showing the `pyenv: version '3.10' is not installed...` error.
 
-4. **Test that the model can download weights**:
-   ```bash
-   rm -rf model_cache
-   cog predict -i prompt="test"
-   ```
+5.  **Fix the conflict:**
+    Change `python_version` back to `"3.10"` in `cog.yaml`.
 
-## Example Implementation
+6.  **Run prediction (it should work again):**
+    ```bash
+    sudo cog predict -i text="Works Again"
+    ```
+    *What you should see:* The prediction finishes successfully.
 
-The template comes with a sample Stable Diffusion implementation in `predict.py` that demonstrates:
+## Ways to work around this
 
-- Setting up the model cache directory
-- Downloading weights from GCS with progress reporting
-- Setting environment variables for model caching
-- Random seed generation for reproducibility
-- Output format and quality options
+*   **Make the versions match:** The simplest fix is to make sure your `.python-version` file and the `python_version` in your `cog.yaml` ask for the exact same Python version.
+*   **Remove `.python-version**:** If you don't need the `.python-version` file for other reasons (like local development outside of Cog), you can just delete it.
+*   **Use `.dockerignore` (maybe):** Adding `.python-version` to your `.dockerignore` file *might* stop Cog from copying it into the container. However, when this bug was first found, this didn't seem to work reliably every time, so it might not be a perfect solution.
 
-## Best Practices
-
-- **Environment Variables**: Set cache-related environment variables early
-  ```python
-  os.environ["HF_HOME"] = MODEL_CACHE
-  os.environ["TORCH_HOME"] = MODEL_CACHE
-  # etc.
-  ```
-
-- **Seed Management**: Provide a seed parameter and implement random seed generation
-  ```python
-  if seed is None:
-      seed = int.from_bytes(os.urandom(2), "big")
-  print(f"Using seed: {seed}")
-  ```
-
-- **Output Formats**: Support multiple output formats (webp, jpg, png) with quality controls
-  ```python
-  output_format: str = Input(
-      description="Format of the output image",
-      choices=["webp", "jpg", "png"],
-      default="webp"
-  )
-  output_quality: int = Input(
-      description="The image compression quality...",
-      ge=1, le=100, default=80
-  )
-  ```
-
-## Deploying to Replicate
-
-After setting up your model, you can push it to [Replicate](https://replicate.com):
-
-1. Create a new model on Replicate
-2. Push your model:
-   ```bash
-   cog push r8.im/username/model-name
-   ```
-
-## License
-
-MIT
-
----
-
-[![Replicate](https://replicate.com/account/model-name/badge)](https://replicate.com/account/model-name) 
-
-⭐ Star the repo on [GitHub](https://github.com/username/repo-name)!
-
-👋 Follow me on [Twitter/X](https://twitter.com/username)
+We hope this example helps figure out exactly why the `.python-version` file interferes with the Python environment Cog sets up based on `cog.yaml`.
