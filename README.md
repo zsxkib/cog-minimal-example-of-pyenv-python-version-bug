@@ -2,6 +2,8 @@
 
 This repository shows a bug in [Cog](https://github.com/replicate/cog) where `cog predict` can fail when starting its container. This happens if you have a `.python-version` file in your project that asks for a different Python version than your `cog.yaml` file does.
 
+*(This was observed with Cog version `0.14.4`)*
+
 **GitHub Issue:** [replicate/cog#2275](https://github.com/replicate/cog/issues/2275)
 
 ## What's happening?
