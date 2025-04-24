@@ -79,7 +79,7 @@ We've set up this repository so you can see the bug in action:
 ## Ways to work around this
 
 *   **Make the versions match:** The simplest fix is to make sure your `.python-version` file and the `python_version` in your `cog.yaml` ask for the exact same Python version.
-*   **Remove `.python-version**:** If you don't need the `.python-version` file for other reasons (like local development outside of Cog), you can just delete it.
+*   **Remove `.python-version`:** If you don't need the `.python-version` file for other reasons (like local development outside of Cog), you can just delete it.
 *   **Use `.dockerignore` (maybe):** Adding `.python-version` to your `.dockerignore` file *might* stop Cog from copying it into the container. However, when this bug was first found, this didn't seem to work reliably every time, so it might not be a perfect solution.
 
 We hope this example helps figure out exactly why the `.python-version` file interferes with the Python environment Cog sets up based on `cog.yaml`.
